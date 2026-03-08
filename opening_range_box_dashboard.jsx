@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
+const API = "http://localhost:8000";
+
 // ── Mock Data Generator ──
 const generateMockData = () => {
   const tickers = [
@@ -262,22 +264,48 @@ export default function App() {
   const [tab, setTab] = useState("scanner");
   const [filter, setFilter] = useState("all");
   const [lastUpdate, setLastUpdate] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [isMock, setIsMock] = useState(false);
 
-  const refresh = useCallback(() => {
-    const d = generateMockData().sort((a, b) => b.score - a.score);
-    setData(d);
-    setLastUpdate(new Date().toLocaleTimeString());
-    if (!selected && d.length > 0) {
-      setSelected(d[0]);
-      setCandles(generateCandleData(d[0]));
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/scan`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const json = await res.json();
+      const d = json.signals.sort((a, b) => b.score - a.score);
+      setData(d);
+      setLastUpdate(json.date + " 실시간");
+      setIsMock(false);
+      if (d.length > 0) {
+        setSelected(d[0]);
+        const cr = await fetch(`${API}/api/candles/${d[0].symbol}`);
+        setCandles(await cr.json());
+      }
+    } catch {
+      const d = generateMockData().sort((a, b) => b.score - a.score);
+      setData(d);
+      setLastUpdate(new Date().toLocaleTimeString() + " (목업)");
+      setIsMock(true);
+      if (d.length > 0) {
+        setSelected(d[0]);
+        setCandles(generateCandleData(d[0]));
+      }
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const selectItem = (item) => {
+  const selectItem = async (item) => {
     setSelected(item);
-    setCandles(generateCandleData(item));
+    try {
+      const res = await fetch(`${API}/api/candles/${item.symbol}`);
+      setCandles(await res.json());
+    } catch {
+      setCandles(generateCandleData(item));
+    }
   };
 
   const filtered = data.filter((d) => {
@@ -308,9 +336,11 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 11, color: "#475569" }}>갱신: {lastUpdate}</span>
-            <button onClick={refresh} style={{ padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.1)", color: "#818cf8", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-              ↻ 스캔
+            <span style={{ fontSize: 11, color: isMock ? "#eab308" : "#22c55e" }}>
+              {isMock ? "⚠ 목업" : "● 실시간"} {lastUpdate}
+            </span>
+            <button onClick={refresh} disabled={loading} style={{ padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.1)", color: "#818cf8", fontSize: 12, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1 }}>
+              {loading ? "⏳ 로딩..." : "↻ 스캔"}
             </button>
           </div>
         </div>

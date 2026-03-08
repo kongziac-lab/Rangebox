@@ -11,6 +11,10 @@ yfinance>=0.2.30          # 개발/테스트용 (무료)
 # polygon-api-client>=1.12  # Polygon.io (권장)
 # alpaca-py>=0.21           # Alpaca
 
+# API 서버
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
 # 알림
 requests>=2.31.0
 
