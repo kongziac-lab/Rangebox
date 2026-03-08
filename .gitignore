@@ -1,0 +1,17 @@
+# Node
+node_modules/
+dist/
+
+# Python
+opening_range_scanner/.venv/
+opening_range_scanner/__pycache__/
+opening_range_scanner/**/__pycache__/
+opening_range_scanner/*.pyc
+opening_range_scanner/backtest_results.json
+
+# 환경변수
+.env
+opening_range_scanner/.env
+
+# macOS
+.DS_Store

@@ -1,0 +1,23 @@
+# 미장 시가 박스 전략 스캐너 - 의존성
+# pip install -r requirements.txt
+
+# 핵심
+pandas>=2.0.0
+numpy>=1.24.0
+pytz>=2023.3
+
+# 데이터 소스 (택 1 이상)
+yfinance>=0.2.30          # 개발/테스트용 (무료)
+# polygon-api-client>=1.12  # Polygon.io (권장)
+# alpaca-py>=0.21           # Alpaca
+
+# 알림
+requests>=2.31.0
+
+# 백테스트 (선택)
+# matplotlib>=3.7.0
+# plotly>=5.15.0
+
+# 자동매매 (선택)
+# alpaca-py>=0.21
+# ib_insync>=0.9.86         # Interactive Brokers

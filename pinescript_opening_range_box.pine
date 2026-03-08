@@ -1,0 +1,255 @@
+// ============================================================================
+// 미장 시가 박스 전략 (US Market Opening Range Box Strategy)
+// Version: 2.0
+// Description: 미국장 첫 1시간 박스를 자동 표시하고 진입 신호를 생성
+// ============================================================================
+
+//@version=5
+indicator("US Opening Range Box Strategy v2", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// ============================================================================
+// 입력 설정
+// ============================================================================
+group_box = "📦 박스 설정"
+sessionInput     = input.session("0930-1030", "박스 형성 구간 (ET)", group=group_box)
+tradeSession     = input.session("1030-1230", "전략 유효 구간 (ET)", group=group_box)
+showMid          = input.bool(true, "중간선 표시", group=group_box)
+showBox          = input.bool(true, "박스 영역 표시", group=group_box)
+tolerancePct     = input.float(0.15, "상/하단 허용오차 (%)", step=0.05, group=group_box)
+
+group_signal = "🎯 신호 설정"
+showSignals      = input.bool(true, "신호 라벨 표시", group=group_signal)
+showBias         = input.bool(true, "바이어스 라벨 표시", group=group_signal)
+confirmBars      = input.int(2, "돌파 확인 봉 수", minval=1, maxval=5, group=group_signal)
+
+group_risk = "⚠️ 리스크 설정"
+target1Mult      = input.float(1.0, "1차 목표 배수", step=0.1, group=group_risk)
+target2Mult      = input.float(2.0, "2차 목표 배수", step=0.1, group=group_risk)
+minRR            = input.float(1.2, "최소 손익비", step=0.1, group=group_risk)
+
+group_style = "🎨 스타일"
+boxHighColor     = input.color(color.new(color.red, 30), "박스 상단 색상", group=group_style)
+boxLowColor      = input.color(color.new(color.green, 30), "박스 하단 색상", group=group_style)
+boxMidColor      = input.color(color.new(color.yellow, 50), "중간선 색상", group=group_style)
+boxBgColor       = input.color(color.new(color.blue, 90), "박스 배경 색상", group=group_style)
+
+// ============================================================================
+// 세션 감지
+// ============================================================================
+inFormation     = not na(time(timeframe.period, sessionInput, "America/New_York"))
+inTradeSession  = not na(time(timeframe.period, tradeSession, "America/New_York"))
+
+// ============================================================================
+// 박스 변수
+// ============================================================================
+var float boxHigh    = na
+var float boxLow     = na
+var float boxMid     = na
+var float boxRange   = na
+var bool  boxReady   = false
+var int   boxStartBar = na
+var int   boxEndBar   = na
+
+// 돌파 추적
+var bool  breakoutUp   = false
+var bool  breakoutDown = false
+var int   breakoutUpCount   = 0
+var int   breakoutDownCount = 0
+
+// 되돌림 추적
+var bool  retestHighDone = false
+var bool  retestLowDone  = false
+
+// ============================================================================
+// 세션 전환 감지
+// ============================================================================
+newSession   = inFormation and not inFormation[1]
+sessionEnded = not inFormation and inFormation[1]
+
+// ============================================================================
+// 박스 계산
+// ============================================================================
+if newSession
+    boxHigh    := high
+    boxLow     := low
+    boxReady   := false
+    breakoutUp := false
+    breakoutDown := false
+    breakoutUpCount := 0
+    breakoutDownCount := 0
+    retestHighDone := false
+    retestLowDone  := false
+    boxStartBar := bar_index
+
+if inFormation
+    boxHigh := math.max(nz(boxHigh, high), high)
+    boxLow  := math.min(nz(boxLow, low), low)
+
+if sessionEnded
+    boxMid   := (boxHigh + boxLow) / 2
+    boxRange := boxHigh - boxLow
+    boxReady := true
+    boxEndBar := bar_index
+
+// ============================================================================
+// 허용오차 계산
+// ============================================================================
+tolerance = boxReady ? boxRange * tolerancePct / 100 : 0
+
+// ============================================================================
+// 현재가 위치 판단
+// ============================================================================
+atBoxHigh     = boxReady and math.abs(close - boxHigh) <= tolerance
+atBoxLow      = boxReady and math.abs(close - boxLow) <= tolerance
+aboveBoxHigh  = boxReady and close > boxHigh
+belowBoxLow   = boxReady and close < boxLow
+aboveMid      = boxReady and close > boxMid and close <= boxHigh
+belowMid      = boxReady and close < boxMid and close >= boxLow
+
+// ============================================================================
+// 돌파 감지 (종가 기준, 확인 봉 수 적용)
+// ============================================================================
+if boxReady and inTradeSession
+    if close > boxHigh
+        breakoutUpCount := breakoutUpCount + 1
+    else
+        breakoutUpCount := 0
+    
+    if close < boxLow
+        breakoutDownCount := breakoutDownCount + 1
+    else
+        breakoutDownCount := 0
+    
+    if breakoutUpCount >= confirmBars
+        breakoutUp := true
+    
+    if breakoutDownCount >= confirmBars
+        breakoutDown := true
+
+// ============================================================================
+// 되돌림(리테스트) 감지
+// ============================================================================
+// 상단 돌파 후 되돌림: 가격이 박스 상단까지 내려왔다가 지지
+retestAfterBreakout = breakoutUp and not retestHighDone and low <= boxHigh + tolerance and close > boxHigh
+if retestAfterBreakout
+    retestHighDone := true
+
+// 하단 이탈 후 되돌림: 가격이 박스 하단까지 올라왔다가 저항
+retestAfterBreakdown = breakoutDown and not retestLowDone and high >= boxLow - tolerance and close < boxLow
+if retestAfterBreakdown
+    retestLowDone := true
+
+// ============================================================================
+// 반전 캔들 감지 (5분봉 기준)
+// ============================================================================
+// 불리시 반전: 아래꼬리가 몸통보다 길고, 종가가 시가 이상
+bullishReversal = (open - low) > math.abs(close - open) * 1.5 and close >= open
+
+// 베어리시 반전: 윗꼬리가 몸통보다 길고, 종가가 시가 이하
+bearishReversal = (high - open) > math.abs(close - open) * 1.5 and close <= open
+
+// ============================================================================
+// 거래량 조건
+// ============================================================================
+avgVol = ta.sma(volume, 20)
+volSurge = volume > avgVol * 1.3
+volDry   = volume < avgVol * 0.7
+
+// ============================================================================
+// 진입 신호 생성
+// ============================================================================
+// A. 박스 상단 저항 숏
+signalShortAtHigh = boxReady and inTradeSession and atBoxHigh and bearishReversal and (volDry or bearishReversal)
+
+// B. 박스 하단 지지 롱
+signalLongAtLow = boxReady and inTradeSession and atBoxLow and bullishReversal
+
+// C. 상단 돌파 후 눌림목 롱
+signalLongRetest = boxReady and inTradeSession and retestAfterBreakout and bullishReversal
+
+// D. 하단 이탈 후 되돌림 숏
+signalShortRetest = boxReady and inTradeSession and retestAfterBreakdown and bearishReversal
+
+// ============================================================================
+// 라인 표시
+// ============================================================================
+plot(boxReady ? boxHigh : na, "Box High", boxHighColor, 2, plot.style_linebr)
+plot(boxReady ? boxLow : na, "Box Low", boxLowColor, 2, plot.style_linebr)
+plot(boxReady and showMid ? boxMid : na, "Box Mid", boxMidColor, 1, plot.style_linebr)
+
+// ============================================================================
+// 박스 배경 표시
+// ============================================================================
+bgcolor(showBox and inFormation ? color.new(color.blue, 95) : na, title="Formation Period")
+bgcolor(showBox and boxReady and inTradeSession ? color.new(color.gray, 96) : na, title="Trade Session")
+
+// ============================================================================
+// 신호 라벨 표시
+// ============================================================================
+if showSignals and signalShortAtHigh
+    label.new(bar_index, high, "SHORT\n@BoxHigh", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+if showSignals and signalLongAtLow
+    label.new(bar_index, low, "LONG\n@BoxLow", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if showSignals and signalLongRetest
+    label.new(bar_index, low, "LONG\nRetest", color=color.teal, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if showSignals and signalShortRetest
+    label.new(bar_index, high, "SHORT\nRetest", color=color.maroon, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// ============================================================================
+// 바이어스 라벨
+// ============================================================================
+if showBias and boxReady and inTradeSession
+    biasText = aboveBoxHigh ? "BREAKOUT ▲" : belowBoxLow ? "BREAKDOWN ▼" : aboveMid ? "LONG BIAS" : belowMid ? "SHORT BIAS" : atBoxHigh ? "@ BOX HIGH" : atBoxLow ? "@ BOX LOW" : "NEUTRAL"
+    biasColor = aboveBoxHigh ? color.teal : belowBoxLow ? color.maroon : aboveMid ? color.green : belowMid ? color.red : color.gray
+
+// ============================================================================
+// 돌파/이탈 시각 표시
+// ============================================================================
+plotshape(breakoutUpCount == confirmBars, title="Breakout Up", style=shape.triangleup, location=location.belowbar, color=color.teal, size=size.small)
+plotshape(breakoutDownCount == confirmBars, title="Breakdown Down", style=shape.triangledown, location=location.abovebar, color=color.maroon, size=size.small)
+
+// ============================================================================
+// 목표가 라인 (돌파 시)
+// ============================================================================
+plot(breakoutUp and boxReady ? boxHigh + boxRange * target1Mult : na, "Target 1 Long", color.new(color.teal, 50), 1, plot.style_circles)
+plot(breakoutUp and boxReady ? boxHigh + boxRange * target2Mult : na, "Target 2 Long", color.new(color.teal, 70), 1, plot.style_circles)
+plot(breakoutDown and boxReady ? boxLow - boxRange * target1Mult : na, "Target 1 Short", color.new(color.maroon, 50), 1, plot.style_circles)
+plot(breakoutDown and boxReady ? boxLow - boxRange * target2Mult : na, "Target 2 Short", color.new(color.maroon, 70), 1, plot.style_circles)
+
+// ============================================================================
+// 정보 테이블
+// ============================================================================
+var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+
+if barstate.islast and boxReady
+    table.cell(infoTable, 0, 0, "📦 Opening Box", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 1, "High", text_color=color.red, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(boxHigh, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 2, "Low", text_color=color.green, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(boxLow, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 3, "Mid", text_color=color.yellow, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(boxMid, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 4, "Range", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(boxRange, "#.##"), text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 0, 5, "Range %", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, str.tostring(boxRange / boxMid * 100, "#.##") + "%", text_color=color.white, text_size=size.small)
+    
+    statusText = breakoutUp ? "🟢 BREAKOUT" : breakoutDown ? "🔴 BREAKDOWN" : aboveMid ? "↗ LONG BIAS" : belowMid ? "↘ SHORT BIAS" : "↔ NEUTRAL"
+    table.cell(infoTable, 0, 6, "Status", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 6, statusText, text_color=color.white, text_size=size.small)
+
+// ============================================================================
+// 알림 조건
+// ============================================================================
+alertcondition(signalShortAtHigh, "Short @ Box High", "박스 상단 저항 숏 신호")
+alertcondition(signalLongAtLow, "Long @ Box Low", "박스 하단 지지 롱 신호")
+alertcondition(signalLongRetest, "Long Retest", "돌파 후 눌림목 롱 신호")
+alertcondition(signalShortRetest, "Short Retest", "이탈 후 되돌림 숏 신호")
+alertcondition(breakoutUpCount == confirmBars, "Breakout Confirmed", "박스 상단 돌파 확인")
+alertcondition(breakoutDownCount == confirmBars, "Breakdown Confirmed", "박스 하단 이탈 확인")
+alertcondition(atBoxHigh, "At Box High", "가격이 박스 상단 도달")
+alertcondition(atBoxLow, "At Box Low", "가격이 박스 하단 도달")
