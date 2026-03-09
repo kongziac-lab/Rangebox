@@ -159,31 +159,85 @@ const MiniChart = ({ data, box, height = 140, onClick }) => {
 
 // ── Chart Modal ──
 const ChartModal = ({ data, box, symbol, onClose }) => {
+  const total = data.length;
+  const [visibleCount, setVisibleCount] = useState(total);
+  const [endIdx, setEndIdx] = useState(total);
+
+  const startIdx = Math.max(0, endIdx - visibleCount);
+  const visibleData = data.slice(startIdx, endIdx);
+
+  const applyZoom = (newCount, keepEnd = true) => {
+    const n = Math.min(total, Math.max(10, newCount));
+    setVisibleCount(n);
+    if (keepEnd) setEndIdx((prev) => Math.min(total, Math.max(n, prev)));
+  };
+
+  const pan = (dir) => {
+    const step = Math.max(1, Math.floor(visibleCount / 5));
+    setEndIdx((prev) => Math.min(total, Math.max(visibleCount, prev + dir * step)));
+  };
+
+  const onWheel = useCallback((e) => {
+    e.preventDefault();
+    applyZoom(visibleCount + (e.deltaY > 0 ? Math.ceil(visibleCount * 0.1) : -Math.ceil(visibleCount * 0.1)));
+  }, [visibleCount]);
+
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") pan(-1);
+      if (e.key === "ArrowRight") pan(1);
+      if (e.key === "+") applyZoom(visibleCount - 10);
+      if (e.key === "-") applyZoom(visibleCount + 10);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, visibleCount, endIdx]);
+
+  const btnStyle = { padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(148,163,184,0.2)", background: "rgba(148,163,184,0.06)", color: "#94a3b8", fontSize: 13, cursor: "pointer", lineHeight: 1 };
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 16, padding: "20px 24px", width: "92vw", maxWidth: 1300 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div onClick={(e) => e.stopPropagation()} onWheel={onWheel} style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 16, padding: "16px 20px", width: "94vw", maxWidth: 1400 }}>
+
+        {/* 헤더 */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9" }}>{symbol}</span>
-            <span style={{ fontSize: 11, color: "#475569" }}>09:30 – 12:30 ET · 1분봉</span>
-            <span style={{ fontSize: 10, color: "#6366f1", background: "rgba(99,102,241,0.1)", padding: "2px 8px", borderRadius: 4 }}>■ 박스 형성</span>
-            <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.08)", padding: "2px 8px", borderRadius: 4 }}>■ 전략 구간</span>
+            <span style={{ fontSize: 11, color: "#475569" }}>
+              {visibleData[0]?.time} – {visibleData[visibleData.length - 1]?.time} ET
+            </span>
+            <span style={{ fontSize: 10, color: "#6366f1", background: "rgba(99,102,241,0.1)", padding: "2px 8px", borderRadius: 4 }}>■ 박스</span>
+            <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.08)", padding: "2px 8px", borderRadius: 4 }}>■ 전략</span>
           </div>
-          <button onClick={onClose} style={{ background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.15)", borderRadius: 8, color: "#94a3b8", fontSize: 14, width: 32, height: 32, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          <button onClick={onClose} style={{ ...btnStyle, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         </div>
-        <MiniChart data={data} box={box} height={480} />
-        <div style={{ marginTop: 10, display: "flex", gap: 20, fontSize: 11, color: "#475569" }}>
+
+        {/* 줌 & 스크롤 컨트롤 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <button onClick={() => applyZoom(visibleCount - Math.ceil(visibleCount * 0.2))} style={btnStyle}>+ 확대</button>
+          <button onClick={() => applyZoom(visibleCount + Math.ceil(visibleCount * 0.2))} style={btnStyle}>− 축소</button>
+          <input
+            type="range" min={10} max={total} value={visibleCount}
+            onChange={(e) => applyZoom(Number(e.target.value))}
+            style={{ flex: 1, accentColor: "#6366f1", cursor: "pointer" }}
+          />
+          <span style={{ fontSize: 11, color: "#475569", minWidth: 60 }}>{visibleData.length}봉 표시</span>
+          <button onClick={() => pan(-1)} style={btnStyle}>◀</button>
+          <button onClick={() => pan(1)} style={btnStyle}>▶</button>
+          <button onClick={() => { setVisibleCount(total); setEndIdx(total); }} style={{ ...btnStyle, color: "#6366f1" }}>전체</button>
+        </div>
+
+        {/* 차트 */}
+        <MiniChart data={visibleData} box={box} height={500} />
+
+        {/* 푸터 */}
+        <div style={{ marginTop: 8, display: "flex", gap: 18, fontSize: 11, color: "#475569", alignItems: "center" }}>
           <span>H <span style={{ color: "#ef4444", fontFamily: "monospace" }}>${box.boxHigh}</span></span>
           <span>M <span style={{ color: "#eab308", fontFamily: "monospace" }}>${box.boxMid}</span></span>
           <span>L <span style={{ color: "#22c55e", fontFamily: "monospace" }}>${box.boxLow}</span></span>
           <span>Range <span style={{ color: "#818cf8", fontFamily: "monospace" }}>{box.boxRangePct}%</span></span>
-          <span style={{ marginLeft: "auto", color: "#334155" }}>ESC 또는 바깥 클릭으로 닫기</span>
+          <span style={{ marginLeft: "auto", color: "#2d3748", fontSize: 10 }}>휠 줌 · ◀▶ 이동 · +/- 키 · ESC 닫기</span>
         </div>
       </div>
     </div>
