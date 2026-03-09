@@ -16,6 +16,7 @@ import logging
 from config.settings import config
 from data.market_data import create_data_engine
 from strategy.opening_range import OpeningRangeScanner
+from ai_filter.filter import AISignalFilter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,15 +120,19 @@ def status():
         "ok": True,
         "last_trading_date": get_last_trading_date(),
         "universe_count": len(config.universe),
+        "ai_available": bool(config.api.openai_api_key),
     }
 
 
 @app.get("/api/scan")
-def scan(date: str = Query(None, description="YYYY-MM-DD (생략 시 마지막 거래일)")):
+def scan(
+    date: str = Query(None, description="YYYY-MM-DD (생략 시 마지막 거래일)"),
+    ai: bool = Query(False, description="AI 필터링 적용 여부"),
+):
     if date is None:
         date = get_last_trading_date()
 
-    logger.info(f"스캔 요청: {date}")
+    logger.info(f"스캔 요청: {date} | AI={ai}")
     engine = create_data_engine(config)
     data_dict = engine.get_multiple(config.universe, date, config.scan.bar_interval)
     logger.info(f"데이터 수신: {len(data_dict)}개 종목")
@@ -148,8 +153,28 @@ def scan(date: str = Query(None, description="YYYY-MM-DD (생략 시 마지막 �
             logger.error(f"[{ticker}] 처리 실패: {e}")
 
     results.sort(key=lambda x: x["score"], reverse=True)
+
+    # AI 필터링
+    if ai and config.api.openai_api_key:
+        logger.info("AI 필터링 시작...")
+        ai_filter = AISignalFilter(config.api.openai_api_key)
+        results = ai_filter.evaluate_batch(results, date)
+        verdict_order = {"PASS": 0, "CAUTION": 1, "SKIP": 2}
+        results.sort(key=lambda x: (
+            verdict_order.get((x.get("ai") or {}).get("verdict", "CAUTION"), 1),
+            -(x["score"])
+        ))
+        logger.info("AI 필터링 완료")
+    elif ai and not config.api.openai_api_key:
+        logger.warning("OPENAI_API_KEY 미설정 — AI 필터링 건너뜀")
+
     logger.info(f"신호 {len(results)}개 반환")
-    return {"date": date, "count": len(results), "signals": results}
+    return {
+        "date": date,
+        "count": len(results),
+        "ai_applied": ai and bool(config.api.openai_api_key),
+        "signals": results,
+    }
 
 
 @app.get("/api/candles/{symbol}")

@@ -72,6 +72,28 @@ const generateCandleData = (box) => {
   return candles;
 };
 
+// ── AI Verdict Badge ──
+const AIBadge = ({ ai }) => {
+  if (!ai) return null;
+  const cfg = {
+    PASS:    { bg: "rgba(34,197,94,0.15)",  border: "rgba(34,197,94,0.4)",   color: "#22c55e", icon: "✅" },
+    CAUTION: { bg: "rgba(234,179,8,0.12)",  border: "rgba(234,179,8,0.35)",  color: "#eab308", icon: "⚠️" },
+    SKIP:    { bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.35)",  color: "#ef4444", icon: "🚫" },
+  };
+  const c = cfg[ai.verdict] || cfg.CAUTION;
+  return (
+    <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, background: c.bg, border: `1px solid ${c.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: ai.reasons?.length ? 6 : 0 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: c.color }}>{c.icon} AI {ai.verdict}</span>
+        <span style={{ fontSize: 11, color: "#64748b" }}>점수 {ai.ai_score}/100</span>
+        {ai.earnings_warning && <span style={{ fontSize: 10, color: "#f87171", background: "rgba(239,68,68,0.1)", padding: "1px 6px", borderRadius: 4 }}>📅 {ai.earnings_warning}</span>}
+      </div>
+      {ai.reasons?.length > 0 && <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.6 }}>{ai.reasons.join(" · ")}</div>}
+      {ai.risk_factors?.length > 0 && <div style={{ fontSize: 10, color: "#f87171", marginTop: 2 }}>{ai.risk_factors.join(" · ")}</div>}
+    </div>
+  );
+};
+
 // ── Signal Badge ──
 const SignalBadge = ({ signal, score }) => {
   const colors = {
@@ -191,6 +213,7 @@ const SignalDetail = ({ item, candles }) => (
         </div>
       ))}
     </div>
+    {item.ai && <AIBadge ai={item.ai} />}
   </div>
 );
 
@@ -266,16 +289,23 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState("");
   const [loading, setLoading] = useState(false);
   const [isMock, setIsMock] = useState(false);
+  const [aiMode, setAiMode] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API}/api/status`).then(r => r.json()).then(d => setAiAvailable(d.ai_available)).catch(() => {});
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/scan`);
+      const url = aiMode ? `${API}/api/scan?ai=true` : `${API}/api/scan`;
+      const res = await fetch(url);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const json = await res.json();
-      const d = json.signals.sort((a, b) => b.score - a.score);
+      const d = json.signals;
       setData(d);
-      setLastUpdate(json.date + " 실시간");
+      setLastUpdate(json.date + (json.ai_applied ? " AI" : " 실시간"));
       setIsMock(false);
       if (d.length > 0) {
         setSelected(d[0]);
@@ -294,7 +324,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [aiMode]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -339,6 +369,11 @@ export default function App() {
             <span style={{ fontSize: 11, color: isMock ? "#eab308" : "#22c55e" }}>
               {isMock ? "⚠ 목업" : "● 실시간"} {lastUpdate}
             </span>
+            {aiAvailable && (
+              <button onClick={() => setAiMode(v => !v)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${aiMode ? "rgba(168,85,247,0.5)" : "rgba(148,163,184,0.15)"}`, background: aiMode ? "rgba(168,85,247,0.15)" : "transparent", color: aiMode ? "#c084fc" : "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                🤖 AI {aiMode ? "ON" : "OFF"}
+              </button>
+            )}
             <button onClick={refresh} disabled={loading} style={{ padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.1)", color: "#818cf8", fontSize: 12, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1 }}>
               {loading ? "⏳ 로딩..." : "↻ 스캔"}
             </button>
@@ -396,7 +431,10 @@ export default function App() {
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#64748b" }}>
                       <span>박스: ${item.boxLow}–${item.boxHigh}</span>
-                      <span>R:R {item.rr} · RVOL {item.rvol}x</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        R:R {item.rr} · RVOL {item.rvol}x
+                        {item.ai && <span style={{ fontWeight: 700, color: item.ai.verdict === "PASS" ? "#22c55e" : item.ai.verdict === "SKIP" ? "#ef4444" : "#eab308" }}>· AI {item.ai.verdict}</span>}
+                      </span>
                     </div>
                   </div>
                 ))}

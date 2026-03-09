@@ -71,6 +71,9 @@ class APIConfig:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
+    # AI 필터링 (OpenAI)
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+
 @dataclass
 class Config:
     """통합 설정"""
