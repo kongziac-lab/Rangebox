@@ -116,21 +116,26 @@ const SignalBadge = ({ signal, score }) => {
 };
 
 // ── Mini Chart ──
-const MiniChart = ({ data, box, width = 320, height = 140 }) => {
+const MiniChart = ({ data, box, height = 140, onClick }) => {
   if (!data || data.length === 0) return null;
-  const pad = { t: 10, b: 20, l: 5, r: 5 };
-  const cw = (width - pad.l - pad.r) / data.length;
+  const VW = 640;
+  const pad = { t: 12, b: 22, l: 6, r: 70 };
+  const cw = (VW - pad.l - pad.r) / data.length;
   const allPrices = data.flatMap((c) => [c.high, c.low]);
   const minP = Math.min(...allPrices, box.boxLow) * 0.999;
   const maxP = Math.max(...allPrices, box.boxHigh) * 1.001;
   const scaleY = (p) => pad.t + ((maxP - p) / (maxP - minP)) * (height - pad.t - pad.b);
 
   return (
-    <svg width={width} height={height} style={{ display: "block" }}>
-      <rect x={pad.l} y={scaleY(box.boxHigh)} width={width - pad.l - pad.r} height={scaleY(box.boxLow) - scaleY(box.boxHigh)} fill="rgba(99,102,241,0.08)" stroke="rgba(99,102,241,0.2)" strokeDasharray="3" />
-      <line x1={pad.l} y1={scaleY(box.boxHigh)} x2={width - pad.r} y2={scaleY(box.boxHigh)} stroke="#ef4444" strokeWidth={1} strokeDasharray="4,3" opacity={0.7} />
-      <line x1={pad.l} y1={scaleY(box.boxLow)} x2={width - pad.r} y2={scaleY(box.boxLow)} stroke="#22c55e" strokeWidth={1} strokeDasharray="4,3" opacity={0.7} />
-      <line x1={pad.l} y1={scaleY(box.boxMid)} x2={width - pad.r} y2={scaleY(box.boxMid)} stroke="#eab308" strokeWidth={0.8} strokeDasharray="2,4" opacity={0.5} />
+    <svg
+      viewBox={`0 0 ${VW} ${height}`}
+      style={{ display: "block", width: "100%", height, cursor: onClick ? "zoom-in" : "default" }}
+      onClick={onClick}
+    >
+      <rect x={pad.l} y={scaleY(box.boxHigh)} width={VW - pad.l - pad.r} height={scaleY(box.boxLow) - scaleY(box.boxHigh)} fill="rgba(99,102,241,0.08)" stroke="rgba(99,102,241,0.2)" strokeDasharray="3" />
+      <line x1={pad.l} y1={scaleY(box.boxHigh)} x2={VW - pad.r} y2={scaleY(box.boxHigh)} stroke="#ef4444" strokeWidth={1} strokeDasharray="4,3" opacity={0.7} />
+      <line x1={pad.l} y1={scaleY(box.boxLow)} x2={VW - pad.r} y2={scaleY(box.boxLow)} stroke="#22c55e" strokeWidth={1} strokeDasharray="4,3" opacity={0.7} />
+      <line x1={pad.l} y1={scaleY(box.boxMid)} x2={VW - pad.r} y2={scaleY(box.boxMid)} stroke="#eab308" strokeWidth={0.8} strokeDasharray="2,4" opacity={0.5} />
       {data.map((c, i) => {
         const x = pad.l + i * cw + cw / 2;
         const bull = c.close >= c.open;
@@ -145,9 +150,43 @@ const MiniChart = ({ data, box, width = 320, height = 140 }) => {
           </g>
         );
       })}
-      <text x={width - pad.r - 2} y={scaleY(box.boxHigh) - 3} fill="#ef4444" fontSize={8} textAnchor="end" fontFamily="monospace">H {box.boxHigh}</text>
-      <text x={width - pad.r - 2} y={scaleY(box.boxLow) + 10} fill="#22c55e" fontSize={8} textAnchor="end" fontFamily="monospace">L {box.boxLow}</text>
+      <text x={VW - pad.r + 4} y={scaleY(box.boxHigh) + 4} fill="#ef4444" fontSize={9} fontFamily="monospace">H {box.boxHigh}</text>
+      <text x={VW - pad.r + 4} y={scaleY(box.boxMid) + 4} fill="#eab308" fontSize={9} fontFamily="monospace">M {box.boxMid}</text>
+      <text x={VW - pad.r + 4} y={scaleY(box.boxLow) + 4} fill="#22c55e" fontSize={9} fontFamily="monospace">L {box.boxLow}</text>
     </svg>
+  );
+};
+
+// ── Chart Modal ──
+const ChartModal = ({ data, box, symbol, onClose }) => {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 16, padding: "20px 24px", width: "92vw", maxWidth: 1300 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9" }}>{symbol}</span>
+            <span style={{ fontSize: 11, color: "#475569" }}>09:30 – 12:30 ET · 1분봉</span>
+            <span style={{ fontSize: 10, color: "#6366f1", background: "rgba(99,102,241,0.1)", padding: "2px 8px", borderRadius: 4 }}>■ 박스 형성</span>
+            <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.08)", padding: "2px 8px", borderRadius: 4 }}>■ 전략 구간</span>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.15)", borderRadius: 8, color: "#94a3b8", fontSize: 14, width: 32, height: 32, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+        <MiniChart data={data} box={box} height={480} />
+        <div style={{ marginTop: 10, display: "flex", gap: 20, fontSize: 11, color: "#475569" }}>
+          <span>H <span style={{ color: "#ef4444", fontFamily: "monospace" }}>${box.boxHigh}</span></span>
+          <span>M <span style={{ color: "#eab308", fontFamily: "monospace" }}>${box.boxMid}</span></span>
+          <span>L <span style={{ color: "#22c55e", fontFamily: "monospace" }}>${box.boxLow}</span></span>
+          <span>Range <span style={{ color: "#818cf8", fontFamily: "monospace" }}>{box.boxRangePct}%</span></span>
+          <span style={{ marginLeft: "auto", color: "#334155" }}>ESC 또는 바깥 클릭으로 닫기</span>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -176,16 +215,22 @@ const RulesCard = () => (
 );
 
 // ── Signal Detail ──
-const SignalDetail = ({ item, candles }) => (
+const SignalDetail = ({ item, candles }) => {
+  const [expanded, setExpanded] = useState(false);
+  return (
   <div style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", border: "1px solid rgba(148,163,184,0.12)", borderRadius: 14, padding: 20, marginBottom: 20 }}>
+    {expanded && <ChartModal data={candles} box={item} symbol={item.symbol} onClose={() => setExpanded(false)} />}
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
       <div>
         <span style={{ fontSize: 22, fontWeight: 800, color: "#f1f5f9", letterSpacing: -0.5 }}>{item.symbol}</span>
         <span style={{ fontSize: 13, color: "#64748b", marginLeft: 10 }}>{item.name} · {item.sector}</span>
       </div>
-      <SignalBadge signal={item.signal} score={item.score} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button onClick={() => setExpanded(true)} style={{ padding: "4px 12px", borderRadius: 7, border: "1px solid rgba(99,102,241,0.25)", background: "rgba(99,102,241,0.08)", color: "#818cf8", fontSize: 11, cursor: "pointer" }}>⛶ 확대</button>
+        <SignalBadge signal={item.signal} score={item.score} />
+      </div>
     </div>
-    <MiniChart data={candles} box={item} width={580} height={180} />
+    <MiniChart data={candles} box={item} height={200} onClick={() => setExpanded(true)} />
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 16 }}>
       {[
         { label: "현재가", value: `$${item.current}`, color: "#f1f5f9" },
@@ -215,7 +260,8 @@ const SignalDetail = ({ item, candles }) => (
     </div>
     {item.ai && <AIBadge ai={item.ai} />}
   </div>
-);
+  );
+};
 
 // ── Architecture Diagram ──
 const ArchDiagram = () => {
