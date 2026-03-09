@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const API = "http://localhost:8000";
 
@@ -164,87 +164,191 @@ const MiniChart = ({ data, box, height = 140, onClick }) => {
   );
 };
 
-// ── Chart Modal ──
+// ── Chart Modal (Full-screen, scrollable) ──
 const ChartModal = ({ data, box, symbol, onClose }) => {
   const total = data.length;
-  const [visibleCount, setVisibleCount] = useState(total);
-  const [endIdx, setEndIdx] = useState(total);
+  const [cw, setCw] = useState(null); // candle width px — null = auto-fit on mount
+  const scrollRef = useRef(null);
+  const dragRef = useRef(null); // { startX, startScrollLeft }
+  const stickToEnd = useRef(true);
 
-  const startIdx = Math.max(0, endIdx - visibleCount);
-  const visibleData = data.slice(startIdx, endIdx);
+  const H = 560;
+  const pad = { t: 16, b: 28, l: 8, r: 8 };
 
-  const applyZoom = (newCount, keepEnd = true) => {
-    const n = Math.min(total, Math.max(10, newCount));
-    setVisibleCount(n);
-    if (keepEnd) setEndIdx((prev) => Math.min(total, Math.max(n, prev)));
-  };
+  // Auto-fit candle width to fill container on first render
+  useEffect(() => {
+    if (scrollRef.current && cw === null) {
+      const w = scrollRef.current.clientWidth;
+      setCw(Math.max(6, Math.floor(w / total)));
+    }
+  }, []);
 
-  const pan = (dir) => {
-    const step = Math.max(1, Math.floor(visibleCount / 5));
-    setEndIdx((prev) => Math.min(total, Math.max(visibleCount, prev + dir * step)));
-  };
+  // Scroll to right end when stickToEnd is active
+  useEffect(() => {
+    if (stickToEnd.current && scrollRef.current && cw !== null) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+    }
+  }, [cw]);
+
+  const safeCw = cw ?? 12;
+  const svgW = total * safeCw + pad.l + pad.r;
+
+  const allPrices = data.flatMap((c) => [c.high, c.low]);
+  const minP = Math.min(...allPrices, box.boxLow) * 0.999;
+  const maxP = Math.max(...allPrices, box.boxHigh) * 1.001;
+  const scaleY = (p) => pad.t + ((maxP - p) / (maxP - minP)) * (H - pad.t - pad.b);
+
+  const zoom = useCallback((factor) => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const visibleCenter = container.scrollLeft + container.clientWidth / 2;
+    const ratio = visibleCenter / Math.max(1, container.scrollWidth);
+    stickToEnd.current = false;
+    setCw((prev) => {
+      const next = Math.max(4, Math.min(120, Math.round((prev ?? 12) * factor)));
+      requestAnimationFrame(() => {
+        if (container) {
+          const newW = total * next + pad.l + pad.r;
+          container.scrollLeft = ratio * newW - container.clientWidth / 2;
+        }
+      });
+      return next;
+    });
+  }, [total]);
 
   const onWheel = useCallback((e) => {
     e.preventDefault();
-    applyZoom(visibleCount + (e.deltaY > 0 ? Math.ceil(visibleCount * 0.1) : -Math.ceil(visibleCount * 0.1)));
-  }, [visibleCount]);
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      zoom(e.deltaY > 0 ? 0.85 : 1.18);
+    } else {
+      // natural horizontal scroll — browser handles it
+      scrollRef.current.scrollLeft += e.deltaY;
+      stickToEnd.current = false;
+    }
+  }, [zoom]);
+
+  const onMouseDown = (e) => {
+    if (e.button !== 0) return;
+    dragRef.current = { startX: e.clientX, startScrollLeft: scrollRef.current.scrollLeft };
+    stickToEnd.current = false;
+  };
+  const onMouseMove = (e) => {
+    if (!dragRef.current) return;
+    scrollRef.current.scrollLeft = dragRef.current.startScrollLeft + (dragRef.current.startX - e.clientX);
+  };
+  const onMouseUp = () => { dragRef.current = null; };
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-      if (e.key === "ArrowLeft") pan(-1);
-      if (e.key === "ArrowRight") pan(1);
-      if (e.key === "+") applyZoom(visibleCount - 10);
-      if (e.key === "-") applyZoom(visibleCount + 10);
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "+" || e.key === "=") zoom(1.2);
+      if (e.key === "-") zoom(0.83);
+      if (e.key === "ArrowLeft" && scrollRef.current) { scrollRef.current.scrollLeft -= safeCw * 5; stickToEnd.current = false; }
+      if (e.key === "ArrowRight" && scrollRef.current) { scrollRef.current.scrollLeft += safeCw * 5; stickToEnd.current = false; }
+      if (e.key === "End" && scrollRef.current) { scrollRef.current.scrollLeft = scrollRef.current.scrollWidth; stickToEnd.current = true; }
+      if (e.key === "Home" && scrollRef.current) { scrollRef.current.scrollLeft = 0; stickToEnd.current = false; }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, visibleCount, endIdx]);
+  }, [onClose, zoom, safeCw]);
 
-  const btnStyle = { padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(148,163,184,0.2)", background: "rgba(148,163,184,0.06)", color: "#94a3b8", fontSize: 13, cursor: "pointer", lineHeight: 1 };
+  const btnStyle = { padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(148,163,184,0.2)", background: "rgba(148,163,184,0.06)", color: "#94a3b8", fontSize: 13, cursor: "pointer", lineHeight: 1, flexShrink: 0 };
+  const labelX = svgW - pad.r - 2;
+
+  // Visible candle count for info label
+  const visibleCount = scrollRef.current ? Math.round(scrollRef.current.clientWidth / safeCw) : total;
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} onWheel={onWheel} style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 16, padding: "16px 20px", width: "94vw", maxWidth: 1400 }}>
-
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.97)", zIndex: 1000 }} onClick={onClose}>
+      <div
+        style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", background: "linear-gradient(135deg, #0a1628 0%, #0f172a 50%, #1a1f35 100%)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 헤더 */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9" }}>{symbol}</span>
-            <span style={{ fontSize: 11, color: "#475569" }}>
-              {visibleData[0]?.time} – {visibleData[visibleData.length - 1]?.time} ET
-            </span>
-            <span style={{ fontSize: 10, color: "#6366f1", background: "rgba(99,102,241,0.1)", padding: "2px 8px", borderRadius: 4 }}>■ 박스</span>
-            <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.08)", padding: "2px 8px", borderRadius: 4 }}>■ 전략</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid rgba(99,102,241,0.15)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: "#f1f5f9", letterSpacing: -0.5 }}>{symbol}</span>
+            <span style={{ fontSize: 11, color: "#475569" }}>{data[0]?.time} – {data[data.length - 1]?.time} ET</span>
+            <span style={{ fontSize: 10, color: "#6366f1", background: "rgba(99,102,241,0.12)", padding: "2px 8px", borderRadius: 4 }}>■ 박스구간</span>
+            <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.08)", padding: "2px 8px", borderRadius: 4 }}>■ 전략구간</span>
+            <span style={{ fontSize: 10, color: "#475569" }}>총 {total}봉 · {safeCw}px/봉</span>
           </div>
-          <button onClick={onClose} style={{ ...btnStyle, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          <button onClick={onClose} style={{ ...btnStyle, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>✕</button>
         </div>
 
-        {/* 줌 & 스크롤 컨트롤 */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <button onClick={() => applyZoom(visibleCount - Math.ceil(visibleCount * 0.2))} style={btnStyle}>+ 확대</button>
-          <button onClick={() => applyZoom(visibleCount + Math.ceil(visibleCount * 0.2))} style={btnStyle}>− 축소</button>
+        {/* 줌 컨트롤 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 20px", borderBottom: "1px solid rgba(148,163,184,0.06)", flexShrink: 0 }}>
+          <button onClick={() => zoom(1.25)} style={btnStyle}>+ 확대</button>
+          <button onClick={() => zoom(0.8)} style={btnStyle}>− 축소</button>
           <input
-            type="range" min={10} max={total} value={visibleCount}
-            onChange={(e) => applyZoom(Number(e.target.value))}
-            style={{ flex: 1, accentColor: "#6366f1", cursor: "pointer" }}
+            type="range" min={4} max={120} value={safeCw}
+            onChange={(e) => { stickToEnd.current = false; setCw(Number(e.target.value)); }}
+            style={{ width: 180, accentColor: "#6366f1", cursor: "pointer" }}
           />
-          <span style={{ fontSize: 11, color: "#475569", minWidth: 60 }}>{visibleData.length}봉 표시</span>
-          <button onClick={() => pan(-1)} style={btnStyle}>◀</button>
-          <button onClick={() => pan(1)} style={btnStyle}>▶</button>
-          <button onClick={() => { setVisibleCount(total); setEndIdx(total); }} style={{ ...btnStyle, color: "#6366f1" }}>전체</button>
+          <button onClick={() => { stickToEnd.current = false; if (scrollRef.current) scrollRef.current.scrollLeft = 0; }} style={btnStyle}>◀ 처음</button>
+          <button onClick={() => { stickToEnd.current = true; if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth; }} style={btnStyle}>끝 ▶</button>
+          <button onClick={() => { if (scrollRef.current) { const w = scrollRef.current.clientWidth; setCw(Math.max(6, Math.floor(w / total))); stickToEnd.current = true; } }} style={{ ...btnStyle, color: "#6366f1" }}>전체보기</button>
+          <span style={{ fontSize: 11, color: "#334155", marginLeft: "auto" }}>드래그 · 마우스휠 스크롤 · Shift+휠 줌 · +/- 키 · ESC 닫기</span>
         </div>
 
-        {/* 차트 */}
-        <MiniChart data={visibleData} box={box} height={500} />
+        {/* 스크롤 차트 영역 */}
+        <div
+          ref={scrollRef}
+          onWheel={onWheel}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseUp}
+          style={{ flex: 1, overflowX: "scroll", overflowY: "hidden", cursor: "grab", userSelect: "none" }}
+        >
+          <svg
+            width={svgW}
+            height={H}
+            style={{ display: "block", height: "100%" }}
+          >
+            {/* 박스 배경 */}
+            <rect x={pad.l} y={scaleY(box.boxHigh)} width={svgW - pad.l - pad.r} height={scaleY(box.boxLow) - scaleY(box.boxHigh)} fill="rgba(99,102,241,0.07)" stroke="rgba(99,102,241,0.2)" strokeDasharray="4" />
+            {/* 수평선 */}
+            <line x1={pad.l} y1={scaleY(box.boxHigh)} x2={svgW - pad.r} y2={scaleY(box.boxHigh)} stroke="#ef4444" strokeWidth={1} strokeDasharray="5,3" opacity={0.8} />
+            <line x1={pad.l} y1={scaleY(box.boxLow)} x2={svgW - pad.r} y2={scaleY(box.boxLow)} stroke="#22c55e" strokeWidth={1} strokeDasharray="5,3" opacity={0.8} />
+            <line x1={pad.l} y1={scaleY(box.boxMid)} x2={svgW - pad.r} y2={scaleY(box.boxMid)} stroke="#eab308" strokeWidth={0.8} strokeDasharray="2,5" opacity={0.5} />
+            {/* 캔들 */}
+            {data.map((c, i) => {
+              const x = pad.l + i * safeCw + safeCw / 2;
+              const bull = c.close >= c.open;
+              const bodyTop = scaleY(Math.max(c.open, c.close));
+              const bodyBot = scaleY(Math.min(c.open, c.close));
+              const bodyH = Math.max(bodyBot - bodyTop, 1);
+              const fill = c.isBoxPeriod ? (bull ? "#6366f1" : "#818cf8") : bull ? "#22c55e" : "#ef4444";
+              const wickW = Math.max(0.5, safeCw * 0.08);
+              const bodyW = Math.max(1, safeCw * 0.7);
+              return (
+                <g key={i}>
+                  <line x1={x} y1={scaleY(c.high)} x2={x} y2={scaleY(c.low)} stroke={fill} strokeWidth={wickW} />
+                  <rect x={x - bodyW / 2} y={bodyTop} width={bodyW} height={bodyH} fill={fill} rx={safeCw > 10 ? 1 : 0} />
+                  {/* 시간 레이블 (일정 간격) */}
+                  {safeCw >= 12 && i % Math.max(1, Math.round(60 / safeCw)) === 0 && (
+                    <text x={x} y={H - 6} fill="#334155" fontSize={9} textAnchor="middle" fontFamily="monospace">{c.time}</text>
+                  )}
+                </g>
+              );
+            })}
+            {/* 가격 레이블 (오른쪽 고정 — sticky via foreignObject 불가, 항상 svgW 끝) */}
+            <rect x={labelX - 68} y={scaleY(box.boxHigh) - 9} width={68} height={13} fill="rgba(10,22,40,0.85)" rx={2} />
+            <text x={labelX} y={scaleY(box.boxHigh) + 3} fill="#ef4444" fontSize={10} fontFamily="monospace" textAnchor="end">H {box.boxHigh}</text>
+            <rect x={labelX - 68} y={scaleY(box.boxMid) - 9} width={68} height={13} fill="rgba(10,22,40,0.85)" rx={2} />
+            <text x={labelX} y={scaleY(box.boxMid) + 3} fill="#eab308" fontSize={10} fontFamily="monospace" textAnchor="end">M {box.boxMid}</text>
+            <rect x={labelX - 68} y={scaleY(box.boxLow) - 9} width={68} height={13} fill="rgba(10,22,40,0.85)" rx={2} />
+            <text x={labelX} y={scaleY(box.boxLow) + 3} fill="#22c55e" fontSize={10} fontFamily="monospace" textAnchor="end">L {box.boxLow}</text>
+          </svg>
+        </div>
 
         {/* 푸터 */}
-        <div style={{ marginTop: 8, display: "flex", gap: 18, fontSize: 11, color: "#475569", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 20, padding: "8px 20px", borderTop: "1px solid rgba(148,163,184,0.06)", fontSize: 11, color: "#475569", alignItems: "center", flexShrink: 0 }}>
           <span>H <span style={{ color: "#ef4444", fontFamily: "monospace" }}>${box.boxHigh}</span></span>
           <span>M <span style={{ color: "#eab308", fontFamily: "monospace" }}>${box.boxMid}</span></span>
           <span>L <span style={{ color: "#22c55e", fontFamily: "monospace" }}>${box.boxLow}</span></span>
           <span>Range <span style={{ color: "#818cf8", fontFamily: "monospace" }}>{box.boxRangePct}%</span></span>
-          <span style={{ marginLeft: "auto", color: "#2d3748", fontSize: 10 }}>휠 줌 · ◀▶ 이동 · +/- 키 · ESC 닫기</span>
         </div>
       </div>
     </div>
