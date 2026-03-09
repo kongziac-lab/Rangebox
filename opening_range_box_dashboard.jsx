@@ -119,12 +119,15 @@ const SignalBadge = ({ signal, score }) => {
 const MiniChart = ({ data, box, height = 140, onClick }) => {
   if (!data || data.length === 0) return null;
   const VW = 640;
-  const pad = { t: 12, b: 22, l: 6, r: 70 };
+  const pad = { t: 12, b: 22, l: 4, r: 4 };
   const cw = (VW - pad.l - pad.r) / data.length;
   const allPrices = data.flatMap((c) => [c.high, c.low]);
   const minP = Math.min(...allPrices, box.boxLow) * 0.999;
   const maxP = Math.max(...allPrices, box.boxHigh) * 1.001;
   const scaleY = (p) => pad.t + ((maxP - p) / (maxP - minP)) * (height - pad.t - pad.b);
+
+  const labelX = VW - pad.r - 2;
+  const labelBg = (y) => ({ x: labelX - 66, y: y - 9, width: 66, height: 12, fill: "rgba(15,23,42,0.75)", rx: 2 });
 
   return (
     <svg
@@ -150,9 +153,13 @@ const MiniChart = ({ data, box, height = 140, onClick }) => {
           </g>
         );
       })}
-      <text x={VW - pad.r + 4} y={scaleY(box.boxHigh) + 4} fill="#ef4444" fontSize={9} fontFamily="monospace">H {box.boxHigh}</text>
-      <text x={VW - pad.r + 4} y={scaleY(box.boxMid) + 4} fill="#eab308" fontSize={9} fontFamily="monospace">M {box.boxMid}</text>
-      <text x={VW - pad.r + 4} y={scaleY(box.boxLow) + 4} fill="#22c55e" fontSize={9} fontFamily="monospace">L {box.boxLow}</text>
+      {/* 라벨: 차트 내부 오른쪽 끝에 오버레이 */}
+      <rect {...labelBg(scaleY(box.boxHigh) + 4)} />
+      <text x={labelX} y={scaleY(box.boxHigh) + 4} fill="#ef4444" fontSize={9} fontFamily="monospace" textAnchor="end">H {box.boxHigh}</text>
+      <rect {...labelBg(scaleY(box.boxMid) + 4)} />
+      <text x={labelX} y={scaleY(box.boxMid) + 4} fill="#eab308" fontSize={9} fontFamily="monospace" textAnchor="end">M {box.boxMid}</text>
+      <rect {...labelBg(scaleY(box.boxLow) + 4)} />
+      <text x={labelX} y={scaleY(box.boxLow) + 4} fill="#22c55e" fontSize={9} fontFamily="monospace" textAnchor="end">L {box.boxLow}</text>
     </svg>
   );
 };
